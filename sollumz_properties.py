@@ -44,6 +44,12 @@ class SollumType(str, Enum):
     NAVMESH_PORTAL = "sollumz_navmesh_portal"
     NAVMESH_POINT = "sollumz_navmesh_point"
 
+    CUTSCENE = "sollumz_cutscene"
+    CUTSCENE_CAMERA = "sollumz_cutscene_camera"
+    CUTSCENE_ACTOR = "sollumz_cutscene_actor"
+    CUTSCENE_BOUNDS = "sollumz_cutscene_bounds"
+    CUTSCENE_OBJECT = "sollumz_cutscene_object"
+
     CLIP_DICTIONARY = "sollumz_clip_dictionary"
     CLIPS = "sollumz_clips"
     CLIP = "sollumz_clip"
@@ -291,6 +297,12 @@ SOLLUMZ_UI_NAMES = {
     SollumType.NAVMESH_POLY_MESH: "NavMesh Poly Mesh",
     SollumType.NAVMESH_PORTAL: "NavMesh Portal",
     SollumType.NAVMESH_POINT: "NavMesh Point",
+
+    SollumType.CUTSCENE: "Cutscene",
+    SollumType.CUTSCENE_CAMERA: "Cutscene Camera",
+    SollumType.CUTSCENE_ACTOR: "Cutscene Actor",
+    SollumType.CUTSCENE_BOUNDS: "Cutscene Bounds",
+    SollumType.CUTSCENE_OBJECT: "Cutscene Object",
 
     SollumType.CLIP_DICTIONARY: "Clip Dictionary",
     SollumType.CLIPS: "Clips",

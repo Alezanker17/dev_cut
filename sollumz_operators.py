@@ -24,6 +24,7 @@ from szio.gta5.cwxml import (
     YMAP,
 )
 from .ynv.ynvimport import import_ynv
+from .cutfile.cutimport import import_cutscene
 from .ycd.ycdimport import import_ycd
 from .ycd.ycdexport import export_ycd
 from .ymap.ymapexport import export_ymap as deprecated_export_ymap
@@ -71,7 +72,8 @@ class ImportAssetsOperatorImpl(ImportSettingsBase, TimedOperator):
     filter_glob: bpy.props.StringProperty(
         default="".join(f"*{ext};" for ext in (
             ".ybn", ".ydr", ".ydd", ".yft", ".ytyp", ".ytd",
-            ".ybn.xml", ".ydr.xml", ".ydd.xml", ".yft.xml", ".ytyp.xml", ".ytd.xml", ".ymap.xml", ".ycd.xml", ".ynv.xml"
+            ".ybn.xml", ".ydr.xml", ".ydd.xml", ".yft.xml", ".ytyp.xml", ".ytd.xml", ".ymap.xml", ".ycd.xml", ".ynv.xml",
+            ".cut.pso.xml", ".cut.xml"
         )),
         options={"HIDDEN", "SKIP_SAVE"},
         maxlen=255,
@@ -140,7 +142,9 @@ class ImportAssetsOperatorImpl(ImportSettingsBase, TimedOperator):
                     import_ycd(str(filepath))
                 elif filename.endswith(YNV.file_extension):
                     import_ynv(str(filepath))
-                elif filepath.suffix in {".ycd", ".ynv"}:
+                elif filename.endswith((".cut.pso.xml", ".cut.xml")):
+                    import_cutscene(str(filepath))
+                elif filepath.suffix in {".ycd", ".ynv", ".cut"}:
                     logger.warning(
                         f"Binary resource format '{filepath.suffix}' is not supported yet. "
                         f"Export them to XML with CodeWalker first."

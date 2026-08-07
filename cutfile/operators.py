@@ -5,7 +5,7 @@ import bpy
 
 from .. import logger
 from ..sollumz_properties import SollumType
-from . import cutanim, cutwrite, cutxml
+from . import cutanim, cutbuild, cutwrite, cutxml
 
 
 def find_cutscene_obj(context) -> bpy.types.Object:
@@ -109,6 +109,57 @@ class SOLLUMZ_OT_export_cutscene(bpy.types.Operator):
 
         logger.info(f"Cutscene '{cutscene.name}': wrote {updated} objects to {self.filepath}")
         self.report({"INFO"}, f"Wrote {updated} objects to {os.path.basename(self.filepath)}")
+        return {"FINISHED"}
+
+
+class SOLLUMZ_OT_build_cutscene_animations(bpy.types.Operator):
+    bl_idname = "sollumz.build_cutscene_animations"
+    bl_label = "Build Cutscene Animations"
+    bl_description = ("Collect the animations of the models bound to this cutscene into clip "
+                      "dictionaries named the way the cutscene looks them up. Export those "
+                      "with Sollumz to get the .ycd files")
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return find_cutscene_obj(context) is not None
+
+    def execute(self, context):
+        cutscene_obj = find_cutscene_obj(context)
+
+        filepath = cutscene_obj.get("cut_filepath", "")
+        if not filepath or not os.path.exists(filepath):
+            self.report({"ERROR"}, "The file this cutscene came from is gone.")
+            return {"CANCELLED"}
+
+        cutscene = cutxml.parse(filepath)
+        cutscene.name = cutscene_obj.get("cut_name", cutscene.name)
+
+        # A placeholder's bound model is its child, that is where the animation lives
+        sources = {}
+        for obj in cutscene_obj.children_recursive:
+            object_id = obj.get("cut_object_id")
+            if object_id is None:
+                continue
+
+            if obj.type == "CAMERA":
+                sources[object_id] = obj
+            else:
+                for child in obj.children:
+                    if child.type == "ARMATURE":
+                        sources[object_id] = child
+                        break
+
+        dictionaries, skipped = cutbuild.build_clip_dictionaries(cutscene, sources)
+
+        lines = [f"Cutscene '{cutscene.name}': built {len(dictionaries)} clip "
+                 f"{'dictionary' if len(dictionaries) == 1 else 'dictionaries'}."]
+        if skipped:
+            lines.append("Nothing to export for: " + ", ".join(sorted(set(skipped))))
+        lines.append("Select them and use Sollumz export to write the .ycd files.")
+
+        logger.info("\n".join(lines))
+        self.report({"INFO"}, lines[0])
         return {"FINISHED"}
 
 

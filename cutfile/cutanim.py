@@ -154,6 +154,24 @@ def find_target_id(obj: bpy.types.Object, model_name: str) -> Optional[bpy.types
     return armature_obj.data if armature_obj is not None else None
 
 
+def place_in_cutscene(target_obj: bpy.types.Object, placeholder: bpy.types.Object):
+    """Parents a model to its cutscene placeholder.
+
+    Animations are authored around the cutscene origin, not the world origin, so a model
+    imported on its own would play its animation wherever it happens to sit. Parenting it
+    to the placeholder puts it under the cutscene offset and rotation, and the mover track
+    takes it from there.
+    """
+    if target_obj == placeholder or target_obj.parent == placeholder:
+        return
+
+    target_obj.parent = placeholder
+    target_obj.matrix_parent_inverse.identity()
+    target_obj.location = (0.0, 0.0, 0.0)
+    target_obj.rotation_euler = (0.0, 0.0, 0.0)
+    target_obj.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+
+
 def build_nla_track(target_obj: bpy.types.Object, actions: list[tuple[float, bpy.types.Action]], fps: int):
     if target_obj.animation_data is None:
         target_obj.animation_data_create()
@@ -235,7 +253,9 @@ def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,
             report.missing_models.append(model_name)
             continue
 
-        build_nla_track(get_data_obj(target_id) or obj, actions, fps)
+        target_obj = get_data_obj(target_id) or obj
+        place_in_cutscene(target_obj, obj)
+        build_nla_track(target_obj, actions, fps)
         report.animated.append(model_name)
 
     return report

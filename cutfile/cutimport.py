@@ -165,7 +165,9 @@ def import_cutscene(filepath: str, create_markers: bool = True, set_frame_range:
 
     cutscene_obj = create_empty(cutscene.name or SOLLUMZ_UI_NAMES[SollumType.CUTSCENE], "SPHERE", 1.0)
     cutscene_obj.sollum_type = SollumType.CUTSCENE
+    # Everything in a cutscene is authored around its own origin, this places it in the world
     cutscene_obj.location = Vector(cutscene.offset)
+    cutscene_obj.rotation_euler = (0.0, 0.0, math.radians(cutscene.rotation))
     cutscene_obj["cut_filepath"] = filepath
     cutscene_obj["cut_name"] = cutscene.name
     cutscene_obj["cut_name_hash"] = cutscene.name_hash

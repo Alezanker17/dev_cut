@@ -2,7 +2,7 @@ import math
 import os
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from .. import logger
 from ..sollumz_properties import SOLLUMZ_UI_NAMES, SollumType
@@ -98,6 +98,10 @@ def create_sphere_obj(cut_obj: cutxml.CutObject, name: str) -> bpy.types.Object:
     obj = create_empty(name, "SPHERE", float(cut_obj.extra.get("fRadius", 0.5) or 0.5))
     obj.location = Vector(cut_obj.extra.get("vPosition", (0.0, 0.0, 0.0)))
     return obj
+
+
+# Most objects are placed relative to the cutscene, these few carry world coordinates
+WORLD_SPACE_KINDS = frozenset(("HiddenModelObject", "FixupModelObject"))
 
 
 def store_object_properties(obj: bpy.types.Object, cut_obj: cutxml.CutObject):
@@ -204,10 +208,19 @@ def import_cutscene(filepath: str, create_markers: bool = True, set_frame_range:
         SollumType.CUTSCENE_OBJECT: "Objects",
     }
 
+    # Built by hand, cutscene_obj.matrix_world is not evaluated yet at this point
+    to_world = Matrix.Translation(cutscene.offset) @ Matrix.Rotation(
+        math.radians(cutscene.rotation), 4, "Z")
+    to_local = to_world.inverted()
+
     for cut_obj in cutscene.objects:
         obj = create_cutscene_obj(cut_obj)
         obj.parent = get_group(group_names[obj.sollum_type])
         collection.objects.link(obj)
+
+        # These were already in world coordinates, undo the cutscene placement they inherit
+        if cut_obj.kind in WORLD_SPACE_KINDS:
+            obj.location = to_local @ obj.location
 
     if set_frame_range and cutscene.duration > 0:
         bpy.context.scene.frame_start = 0

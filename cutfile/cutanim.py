@@ -1,3 +1,4 @@
+import collections
 import os
 import re
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ class CutsceneImportReport:
     clip_dictionaries: list[str] = field(default_factory=list)
     missing_clip_dictionaries: list[str] = field(default_factory=list)
     animated: list[str] = field(default_factory=list)
+    copied: list[str] = field(default_factory=list)
     missing_models: list[str] = field(default_factory=list)
 
     def lines(self) -> list[str]:
@@ -29,6 +31,11 @@ class CutsceneImportReport:
         if self.missing_clip_dictionaries:
             lines.append("Missing clip dictionaries, expected next to the cutscene file:")
             lines += [f"    {name}" for name in self.missing_clip_dictionaries]
+
+        if self.copied:
+            counts = collections.Counter(self.copied)
+            lines.append("Copied to cover repeated instances: "
+                         + ", ".join(f"{name} x{n}" for name, n in sorted(counts.items())))
 
         if self.missing_models:
             lines.append("Missing models, import them and run 'Bind Cutscene Animations':")
@@ -135,23 +142,74 @@ def match_animations(cutscene: cutxml.Cutscene, animation_names: list[str]) -> d
     return matched
 
 
-def find_armature(model_name: str) -> Optional[bpy.types.Object]:
-    for obj in bpy.data.objects:
-        if obj.type != "ARMATURE":
-            continue
-
-        if obj.name == model_name or obj.name.startswith(f"{model_name}."):
-            return obj
-
-    return None
+def find_armatures(model_name: str) -> list[bpy.types.Object]:
+    """All armatures for a model, by name or by the mark left on a previous bind."""
+    return [obj for obj in bpy.data.objects
+            if obj.type == "ARMATURE"
+            and (obj.get("cut_model") == model_name
+                 or obj.name == model_name
+                 or obj.name.startswith(f"{model_name}."))]
 
 
-def find_target_id(obj: bpy.types.Object, model_name: str) -> Optional[bpy.types.ID]:
+def copy_branch(source_obj: bpy.types.Object, parent: Optional[bpy.types.Object],
+                armature_obj: Optional[bpy.types.Object]) -> bpy.types.Object:
+    new_obj = source_obj.copy()
+    new_obj.animation_data_clear()
+
+    if parent is not None:
+        new_obj.parent = parent
+        new_obj.matrix_parent_inverse = source_obj.matrix_parent_inverse.copy()
+
+    for collection in source_obj.users_collection:
+        collection.objects.link(new_obj)
+
+    if armature_obj is not None:
+        for modifier in new_obj.modifiers:
+            if modifier.type == "ARMATURE":
+                modifier.object = armature_obj
+
+    for child in source_obj.children:
+        copy_branch(child, new_obj, armature_obj)
+
+    return new_obj
+
+
+def duplicate_model(source_obj: bpy.types.Object) -> bpy.types.Object:
+    """Copies a model, with everything under it, so a second instance can play its own
+    animation.
+
+    The armature data is copied rather than linked, because an animation targets armature
+    data and there must be exactly one object using it. Meshes stay linked, they are
+    identical, so the copies cost almost nothing.
+    """
+    new_obj = source_obj.copy()
+    new_obj.data = source_obj.data.copy()
+    new_obj.animation_data_clear()
+
+    for collection in source_obj.users_collection:
+        collection.objects.link(new_obj)
+
+    for child in source_obj.children:
+        copy_branch(child, new_obj, new_obj)
+
+    return new_obj
+
+
+def find_target_obj(obj: bpy.types.Object, model_name: str,
+                    used: set[str]) -> tuple[Optional[bpy.types.Object], bool]:
+    """Picks the model for this cutscene object, copying it if every instance is taken."""
     if obj.sollum_type == SollumType.CUTSCENE_CAMERA:
-        return obj.data
+        return obj, False
 
-    armature_obj = find_armature(model_name)
-    return armature_obj.data if armature_obj is not None else None
+    armatures = find_armatures(model_name)
+    if not armatures:
+        return None, False
+
+    for armature_obj in armatures:
+        if armature_obj.name not in used:
+            return armature_obj, False
+
+    return duplicate_model(armatures[0]), True
 
 
 def place_in_cutscene(target_obj: bpy.types.Object, placeholder: bpy.types.Object):
@@ -222,6 +280,7 @@ def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,
 
     fps = bpy.context.scene.render.fps or 30
     start_times = [0.0] + list(cutscene.section_boundaries)
+    used: set[str] = set()
 
     for object_id, animation_name in matched.items():
         obj = objects_by_id.get(object_id)
@@ -233,10 +292,13 @@ def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,
 
         obj["cut_animation"] = animation_name
 
-        target_id = find_target_id(obj, model_name)
-        if target_id is None:
+        target_obj, copied = find_target_obj(obj, model_name, used)
+        if target_obj is None:
             report.missing_models.append(model_name)
             continue
+
+        used.add(target_obj.name)
+        target_id = target_obj.data
 
         actions = []
         for section, animations in enumerate(section_animations):
@@ -253,9 +315,11 @@ def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,
             report.missing_models.append(model_name)
             continue
 
-        target_obj = get_data_obj(target_id) or obj
+        target_obj["cut_model"] = model_name
         place_in_cutscene(target_obj, obj)
         build_nla_track(target_obj, actions, fps)
         report.animated.append(model_name)
+        if copied:
+            report.copied.append(model_name)
 
     return report

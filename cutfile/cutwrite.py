@@ -5,6 +5,7 @@ back out exactly as it went in. Nothing is rebuilt from the parsed model, becaus
 does not carry every field of every object type and rebuilding would silently drop them.
 """
 
+import copy
 import math
 import xml.etree.ElementTree as ET
 from typing import Optional
@@ -163,8 +164,9 @@ def set_duration(cutscene: cutxml.Cutscene, duration: float) -> bool:
     if not set_value(root, "fTotalDuration", duration):
         return False
 
-    # Events sitting at the old end are the ones that stop things; keep them at the end
-    for event in cutscene.events:
+    # Events sitting at the old end are the ones that stop and unload things; keep them
+    # there. The load event list matters too, that is where the unloads live.
+    for event in cutscene.events + cutscene.load_events:
         if old > 0.0 and abs(event.time - old) < 0.05:
             set_event_time(event, duration)
 
@@ -204,6 +206,99 @@ def set_model(cut_obj: cutxml.CutObject, model_name: str) -> bool:
     node.text = model_name
     cut_obj.extra["StreamingName"] = model_name
     return True
+
+
+def next_object_id(cutscene: cutxml.Cutscene) -> int:
+    return max((obj.object_id for obj in cutscene.objects), default=-1) + 1
+
+
+def clone_object(cutscene: cutxml.Cutscene, source: cutxml.CutObject) -> Optional[cutxml.CutObject]:
+    """Adds a copy of an existing object, with a fresh id.
+
+    Cloning rather than building a node from scratch keeps every field the game expects,
+    in the order it expects them, without having to know what they all are.
+    """
+    holder = cutscene.tree.getroot().find("pCutsceneObjects")
+    if holder is None or source.node is None:
+        return None
+
+    node = copy.deepcopy(source.node)
+    holder.append(node)
+
+    obj = cutxml.parse_object(node)
+    obj.object_id = next_object_id(cutscene)
+    set_value(node, "iObjectId", obj.object_id)
+
+    cutscene.objects.append(obj)
+    return obj
+
+
+def clone_event_args(cutscene: cutxml.Cutscene,
+                     source: cutxml.CutEventArgs) -> Optional[cutxml.CutEventArgs]:
+    """Adds a copy of an existing argument block and returns it, ready to be pointed at.
+
+    Arguments are referenced by their position in the list, so they can only be appended:
+    inserting or removing one would silently shift every reference after it.
+    """
+    holder = cutscene.tree.getroot().find("pCutsceneEventArgsList")
+    if holder is None or source.node is None:
+        return None
+
+    node = copy.deepcopy(source.node)
+    holder.append(node)
+
+    args = cutxml.parse_event_args(node, len(cutscene.event_args))
+    cutscene.event_args.append(args)
+    return args
+
+
+def clone_event(cutscene: cutxml.Cutscene, source: cutxml.CutEvent, time: float,
+                object_id: Optional[int] = None,
+                args: Optional[cutxml.CutEventArgs] = None,
+                load_event: bool = False) -> Optional[cutxml.CutEvent]:
+    """Adds a copy of an existing event at a new time, optionally retargeted."""
+    holder_tag = "pCutsceneLoadEventList" if load_event else "pCutsceneEventList"
+    holder = cutscene.tree.getroot().find(holder_tag)
+    if holder is None or source.node is None:
+        return None
+
+    node = copy.deepcopy(source.node)
+    holder.append(node)
+
+    set_value(node, "fTime", float(time))
+    if object_id is not None:
+        set_value(node, "iObjectId", object_id)
+    if args is not None:
+        set_value(node, "iEventArgsIndex", args.index)
+
+    event = cutxml.parse_event(node)
+    (cutscene.load_events if load_event else cutscene.events).append(event)
+    return event
+
+
+def validate(cutscene: cutxml.Cutscene) -> list[str]:
+    """Checks the cross references hold up. An empty list means the file is coherent."""
+    problems = []
+
+    ids = [obj.object_id for obj in cutscene.objects]
+    duplicates = {i for i in ids if ids.count(i) > 1}
+    if duplicates:
+        problems.append(f"duplicate object ids: {sorted(duplicates)}")
+
+    for event in cutscene.events + cutscene.load_events:
+        if event.args_ref is not None and not 0 <= event.args_ref < len(cutscene.event_args):
+            problems.append(f"event at {event.time:.2f}s points at argument {event.args_ref}, "
+                            f"but there are {len(cutscene.event_args)}")
+
+        if event.object_id >= 0 and cutscene.object_by_id(event.object_id) is None:
+            problems.append(f"event at {event.time:.2f}s points at object {event.object_id}, "
+                            "which does not exist")
+
+        if event.time < 0.0 or (cutscene.duration and event.time > cutscene.duration + 0.01):
+            problems.append(f"event at {event.time:.2f}s falls outside the cutscene "
+                            f"({cutscene.duration:.2f}s)")
+
+    return sorted(set(problems))
 
 
 def save(cutscene: cutxml.Cutscene, filepath: str):

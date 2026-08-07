@@ -128,6 +128,29 @@ def get_object_kind(node: ET.Element) -> str:
     return kind.removeprefix("cutf")
 
 
+def get_scalar(node: ET.Element) -> Any:
+    raw = node.get("value")
+    if raw.strip().lower() in ("true", "false"):
+        return raw.strip().lower() == "true"
+
+    try:
+        return float(raw) if "." in raw else int(raw)
+    except ValueError:
+        return raw
+
+
+def get_item_list(node: ET.Element) -> list:
+    """A list of <Item> elements, each either plain text or a structure of its own."""
+    items = []
+    for item in node.findall("Item"):
+        if len(item):
+            items.append(get_extra_fields(item, frozenset()))
+        else:
+            items.append(get_text(item))
+
+    return items
+
+
 def get_extra_fields(node: ET.Element, skip: frozenset) -> dict[str, Any]:
     extra = {}
 
@@ -136,18 +159,17 @@ def get_extra_fields(node: ET.Element, skip: frozenset) -> dict[str, Any]:
             continue
 
         if child.get("value") is not None:
-            raw = child.get("value")
-            if raw.strip().lower() in ("true", "false"):
-                extra[child.tag] = raw.strip().lower() == "true"
-            else:
-                try:
-                    extra[child.tag] = float(raw) if "." in raw else int(raw)
-                except ValueError:
-                    extra[child.tag] = raw
+            extra[child.tag] = get_scalar(child)
         elif child.get("x") is not None:
             extra[child.tag] = get_vector(child)
         elif child.get("content") == "int_array":
             extra[child.tag] = get_int_array(child)
+        elif len(child):
+            # Nested: either a list of items, or a structure with fields of its own
+            if child.find("Item") is not None:
+                extra[child.tag] = get_item_list(child)
+            else:
+                extra[child.tag] = get_extra_fields(child, frozenset())
         else:
             text = get_text(child)
             if text:
@@ -227,6 +249,7 @@ class CutEvent:
     object_id: int = -1
     args_ref: Optional[int] = None
     is_child: bool = False
+    sticky_id: int = 0
     kind: str = ""
     node: Optional[ET.Element] = None
 
@@ -350,6 +373,7 @@ def parse_event(node: ET.Element) -> CutEvent:
         object_id=get_value(node.find("iObjectId"), int, -1),
         args_ref=get_event_args_ref(node),
         is_child=get_value(node.find("IsChild"), bool, False),
+        sticky_id=get_value(node.find("StickyId"), int, 0),
         kind=get_object_kind(node),
         node=node,
     )

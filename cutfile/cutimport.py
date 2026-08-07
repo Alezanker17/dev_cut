@@ -1,3 +1,4 @@
+import math
 import os
 
 import bpy
@@ -59,6 +60,46 @@ def create_bounds_obj(cut_obj: cutxml.CutObject, name: str) -> bpy.types.Object:
     return obj
 
 
+LIGHT_KINDS = frozenset(("LightObject", "AnimatedLightObject"))
+SPHERE_KINDS = frozenset(("HiddenModelObject", "FixupModelObject"))
+
+# iLightType, the only two values the game ships
+LIGHT_TYPES = {1: "POINT", 2: "SPOT"}
+
+
+def create_light_obj(cut_obj: cutxml.CutObject, name: str) -> bpy.types.Object:
+    light = bpy.data.lights.new(name, LIGHT_TYPES.get(cut_obj.extra.get("iLightType"), "POINT"))
+    light.color = cut_obj.extra.get("vColour", (1.0, 1.0, 1.0))
+    light.energy = float(cut_obj.extra.get("fIntensity", 1.0) or 0.0)
+
+    falloff = float(cut_obj.extra.get("fFallOff", 0.0) or 0.0)
+    if falloff > 0.0:
+        light.use_custom_distance = True
+        light.cutoff_distance = falloff
+
+    if light.type == "SPOT":
+        light.spot_size = math.radians(float(cut_obj.extra.get("fConeAngle", 45.0) or 45.0))
+        inner = float(cut_obj.extra.get("fInnerConeAngle", 0.0) or 0.0)
+        if light.spot_size > 0.0:
+            light.spot_blend = max(0.0, 1.0 - math.radians(inner) / light.spot_size)
+
+    obj = bpy.data.objects.new(name, light)
+    obj.location = Vector(cut_obj.extra.get("vPosition", (0.0, 0.0, 0.0)))
+
+    direction = Vector(cut_obj.extra.get("vDirection", (0.0, 0.0, -1.0)))
+    if direction.length > 0.0:
+        obj.rotation_mode = "QUATERNION"
+        obj.rotation_quaternion = Vector((0.0, 0.0, -1.0)).rotation_difference(direction.normalized())
+
+    return obj
+
+
+def create_sphere_obj(cut_obj: cutxml.CutObject, name: str) -> bpy.types.Object:
+    obj = create_empty(name, "SPHERE", float(cut_obj.extra.get("fRadius", 0.5) or 0.5))
+    obj.location = Vector(cut_obj.extra.get("vPosition", (0.0, 0.0, 0.0)))
+    return obj
+
+
 def store_object_properties(obj: bpy.types.Object, cut_obj: cutxml.CutObject):
     obj["cut_object_id"] = cut_obj.object_id
     obj["cut_object_kind"] = cut_obj.kind
@@ -78,6 +119,12 @@ def create_cutscene_obj(cut_obj: cutxml.CutObject) -> bpy.types.Object:
     elif cut_obj.is_bounds:
         obj = create_bounds_obj(cut_obj, name)
         obj.sollum_type = SollumType.CUTSCENE_BOUNDS
+    elif cut_obj.kind in LIGHT_KINDS:
+        obj = create_light_obj(cut_obj, name)
+        obj.sollum_type = SollumType.CUTSCENE_OBJECT
+    elif cut_obj.kind in SPHERE_KINDS:
+        obj = create_sphere_obj(cut_obj, name)
+        obj.sollum_type = SollumType.CUTSCENE_OBJECT
     elif cut_obj.is_actor:
         obj = create_empty(name, *EMPTY_DISPLAY.get(cut_obj.kind, ("ARROWS", 0.5)))
         obj.sollum_type = SollumType.CUTSCENE_ACTOR

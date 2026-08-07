@@ -110,8 +110,17 @@ def store_object_properties(obj: bpy.types.Object, cut_obj: cutxml.CutObject):
             obj[f"cut_{key}"] = value
 
 
+def get_object_label(cut_obj: cutxml.CutObject) -> str:
+    # Particle effects are identified by dictionary and effect name, both plain text
+    fx_list = cut_obj.extra.get("athFxListHash")
+    if fx_list:
+        return f"{cut_obj.object_id} {fx_list}/{cut_obj.display_name}"
+
+    return f"{cut_obj.object_id} {cut_obj.display_name}"
+
+
 def create_cutscene_obj(cut_obj: cutxml.CutObject) -> bpy.types.Object:
-    name = f"{cut_obj.object_id} {cut_obj.display_name}"
+    name = get_object_label(cut_obj)
 
     if cut_obj.is_camera:
         obj = bpy.data.objects.new(name, bpy.data.cameras.new(name))

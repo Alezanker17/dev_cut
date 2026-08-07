@@ -294,7 +294,9 @@ def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,
 
         target_obj, copied = find_target_obj(obj, model_name, used)
         if target_obj is None:
-            report.missing_models.append(model_name)
+            # Only models can be bound to something; effects and the like have no armature
+            if cut_obj.is_actor:
+                report.missing_models.append(model_name)
             continue
 
         used.add(target_obj.name)

@@ -156,6 +156,56 @@ def apply_sphere(cut_obj: cutxml.CutObject, obj, to_world) -> bool:
     return set_value(cut_obj.node, "fRadius", float(obj.empty_display_size)) or changed
 
 
+def set_duration(cutscene: cutxml.Cutscene, duration: float) -> bool:
+    """Sets the cutscene length, and the events that mark its end move with it."""
+    root = cutscene.tree.getroot()
+    old = cutscene.duration
+    if not set_value(root, "fTotalDuration", duration):
+        return False
+
+    # Events sitting at the old end are the ones that stop things; keep them at the end
+    for event in cutscene.events:
+        if old > 0.0 and abs(event.time - old) < 0.05:
+            set_event_time(event, duration)
+
+    set_value(root, "iRangeEnd", int(round(duration * 30.0)))
+    cutscene.duration = duration
+    return True
+
+
+def set_placement(cutscene: cutxml.Cutscene, offset: tuple[float, float, float],
+                  rotation: float = 0.0) -> bool:
+    root = cutscene.tree.getroot()
+    changed = set_vector(root, "vOffset", offset)
+    changed = set_value(root, "fRotation", rotation) or changed
+    cutscene.offset = offset
+    cutscene.rotation = rotation
+    return changed
+
+
+# A cutscene carries no name of its own: none of the game's 465 cutscene files has a cName
+# or an iNameHash. The name is the file name, so renaming one is a matter of renaming the
+# .cut and its .ycd files, nothing has to be written inside.
+
+
+def set_model(cut_obj: cutxml.CutObject, model_name: str) -> bool:
+    """Points a model object at a different model.
+
+    Only StreamingName is touched. cName is a hash the game never resolves back to text,
+    so leaving it alone costs nothing and avoids inventing a name.
+    """
+    if cut_obj.node is None:
+        return False
+
+    node = cut_obj.node.find("StreamingName")
+    if node is None:
+        return False
+
+    node.text = model_name
+    cut_obj.extra["StreamingName"] = model_name
+    return True
+
+
 def save(cutscene: cutxml.Cutscene, filepath: str):
     if cutscene.tree is None:
         raise ValueError("this cutscene was not parsed from a file, there is no tree to write")

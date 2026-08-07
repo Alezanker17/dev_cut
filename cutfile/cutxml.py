@@ -20,7 +20,7 @@ BOUNDS_KINDS = frozenset((
 ))
 
 COMMON_OBJECT_TAGS = frozenset(("iObjectId", "cName", "attributeList"))
-COMMON_ARGS_TAGS = frozenset(("cName", "iObjectId", "iObjectIdList", "attributeList"))
+COMMON_ARGS_TAGS = frozenset(("cName", "iObjectId", "iObjectIdList", "attributeList", "cutfAttributes"))
 
 
 def get_text(node: Optional[ET.Element]) -> str:
@@ -82,6 +82,44 @@ def get_int_array(node: Optional[ET.Element]) -> list[int]:
             pass
 
     return values
+
+
+CUTF_TYPES = {"cutf_int": int, "cutf_float": float, "cutf_string": str}
+
+
+def get_cutf_attributes(node: ET.Element) -> dict[str, Any]:
+    """Reads a cutfAttributeList: named, typed values carried by some events.
+
+    Only a handful of events use these, but they hold the whole payload of those events,
+    so dropping them would leave them looking empty.
+    """
+    holder = node.find("cutfAttributes")
+    if holder is None:
+        return {}
+
+    items = holder.find("Items")
+    if items is None:
+        return {}
+
+    attributes = {}
+    for item in items.findall("Item"):
+        name = get_text(item.find("Name"))
+        if not name:
+            continue
+
+        cast = CUTF_TYPES.get(item.get("type", ""), str)
+        value_node = item.find("Value")
+        raw = value_node.get("value") if value_node is not None else None
+        if raw is None:
+            attributes[name] = get_text(value_node)
+            continue
+
+        try:
+            attributes[name] = cast(raw)
+        except ValueError:
+            attributes[name] = raw
+
+    return attributes
 
 
 def get_object_kind(node: ET.Element) -> str:
@@ -167,6 +205,7 @@ class CutEventArgs:
     object_id: Optional[int] = None
     object_id_list: list[int] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
     node: Optional[ET.Element] = None
 
     def __str__(self) -> str:
@@ -279,6 +318,7 @@ def parse_event_args(node: ET.Element, index: int) -> CutEventArgs:
         object_id=get_value(object_id_node, int, -1) if object_id_node is not None else None,
         object_id_list=get_int_array(node.find("iObjectIdList")),
         extra=get_extra_fields(node, COMMON_ARGS_TAGS),
+        attributes=get_cutf_attributes(node),
         node=node,
     )
 

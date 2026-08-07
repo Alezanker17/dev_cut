@@ -124,6 +124,7 @@ class CutObject:
     kind: str = ""
     name: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
+    node: Optional[ET.Element] = None
 
     @property
     def is_camera(self) -> bool:
@@ -166,6 +167,7 @@ class CutEventArgs:
     object_id: Optional[int] = None
     object_id_list: list[int] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
+    node: Optional[ET.Element] = None
 
     def __str__(self) -> str:
         parts = [self.kind]
@@ -187,6 +189,7 @@ class CutEvent:
     args_ref: Optional[int] = None
     is_child: bool = False
     kind: str = ""
+    node: Optional[ET.Element] = None
 
     def resolve(self, event_args: list[CutEventArgs]) -> Optional[CutEventArgs]:
         if self.args_ref is None or not 0 <= self.args_ref < len(event_args):
@@ -216,6 +219,7 @@ class Cutscene:
     section_boundaries: list[float] = field(default_factory=list)
     section_duration: float = 0.0
     face_dir: str = ""
+    tree: Optional[ET.ElementTree] = None
 
     objects: list[CutObject] = field(default_factory=list)
     event_args: list[CutEventArgs] = field(default_factory=list)
@@ -261,6 +265,7 @@ def parse_object(node: ET.Element) -> CutObject:
         kind=get_object_kind(node),
         name=get_text(node.find("cName")),
         extra=get_extra_fields(node, COMMON_OBJECT_TAGS),
+        node=node,
     )
 
 
@@ -274,6 +279,7 @@ def parse_event_args(node: ET.Element, index: int) -> CutEventArgs:
         object_id=get_value(object_id_node, int, -1) if object_id_node is not None else None,
         object_id_list=get_int_array(node.find("iObjectIdList")),
         extra=get_extra_fields(node, COMMON_ARGS_TAGS),
+        node=node,
     )
 
 
@@ -305,6 +311,7 @@ def parse_event(node: ET.Element) -> CutEvent:
         args_ref=get_event_args_ref(node),
         is_child=get_value(node.find("IsChild"), bool, False),
         kind=get_object_kind(node),
+        node=node,
     )
 
 
@@ -317,7 +324,8 @@ def parse_item_list(root: ET.Element, tag: str, parse_func) -> list:
 
 
 def parse(filepath: str) -> Cutscene:
-    root = ET.parse(filepath).getroot()
+    tree = ET.parse(filepath)
+    root = tree.getroot()
 
     # Identify by contents rather than by root tag name, exporters do not agree on it
     if root.find("pCutsceneObjects") is None:
@@ -337,6 +345,7 @@ def parse(filepath: str) -> Cutscene:
         section_boundaries=get_float_array(root.find("cameraCutList")),
         section_duration=get_value(root.find("fSectionByTimeSliceDuration"), float, 0.0),
         face_dir=get_text(root.find("cFaceDir")),
+        tree=tree,
     )
 
     cutscene.objects = parse_item_list(root, "pCutsceneObjects", parse_object)

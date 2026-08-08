@@ -37,7 +37,13 @@ def get_animation_names(cutscene: cutxml.Cutscene, section: int) -> dict[int, st
 
         variant = used.get(model, 0)
         used[model] = variant + 1
+
         suffix = f"^{variant}" if variant else ""
+        # Peds whose face is baked into the body animation get a "_dual" clip, which is how
+        # the game's own files name them
+        if cut_obj.extra.get("bFaceAndBodyAreMerged"):
+            suffix += "_dual"
+
         names[cut_obj.object_id] = f"{model}{suffix}-{section}"
 
     return names
@@ -62,8 +68,11 @@ def add_animation(animations_obj: bpy.types.Object, clips_obj: bpy.types.Object,
     animation_obj = create_anim_obj(SollumType.ANIMATION)
     animation_obj.name = name
     animation_obj.animation_properties.hash = name
-    animation_obj.animation_properties.action = action
+
+    # Target first: assigning it retargets whatever action is already there, and the action
+    # is written for this target, so it must not be present yet or it gets converted twice.
     animation_obj.animation_properties.target_id = target
+    animation_obj.animation_properties.action = action
     animation_obj.parent = animations_obj
 
     clip_obj = create_anim_obj(SollumType.CLIP)

@@ -241,10 +241,23 @@ def build_nla_track(target_obj: bpy.types.Object, actions: list[tuple[float, bpy
     track = target_obj.animation_data.nla_tracks.new()
     track.name = "Cutscene"
 
-    for start_time, action in actions:
-        strip = track.strips.new(action.name, round(start_time * fps), action)
+    previous = None
+    for start_time, action in sorted(actions, key=lambda item: item[0]):
+        start = round(start_time * fps)
+
+        # A section's animation can be longer than the section itself. Trim the strip before
+        # it so the next one has room, otherwise Blender refuses to place it.
+        if previous is not None and previous.frame_end > start:
+            previous.frame_end = max(previous.frame_start + 1, start)
+
+        try:
+            strip = track.strips.new(action.name, start, action)
+        except RuntimeError:
+            continue
+
         strip.blend_type = "COMBINE"
         strip.extrapolation = "NOTHING"
+        previous = strip
 
 
 def import_cutscene_animations(filepath: str, cutscene: cutxml.Cutscene,

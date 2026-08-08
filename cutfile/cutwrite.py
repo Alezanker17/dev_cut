@@ -268,12 +268,134 @@ def clone_event(cutscene: cutxml.Cutscene, source: cutxml.CutEvent, time: float,
     set_value(node, "fTime", float(time))
     if object_id is not None:
         set_value(node, "iObjectId", object_id)
+
     if args is not None:
-        set_value(node, "iEventArgsIndex", args.index)
+        if node.find("iEventArgsIndex") is not None:
+            set_value(node, "iEventArgsIndex", args.index)
+        else:
+            # exporters other than CodeWalker use a ref instead of an index
+            ref = node.find("pEventArgs")
+            if ref is None:
+                holder.remove(node)  # better no event than one that cannot reach its args
+                return None
+            ref.set("ref", str(args.index))
 
     event = cutxml.parse_event(node)
     (cutscene.load_events if load_event else cutscene.events).append(event)
     return event
+
+
+def set_int_array(node: Optional[ET.Element], tag: str, values: list[int]) -> bool:
+    if node is None:
+        return False
+
+    child = node.find(tag)
+    if child is None:
+        return False
+
+    text = " ".join(str(value) for value in values)
+    if (child.text or "").split() == text.split():
+        return False
+
+    child.text = text
+    return True
+
+
+def args_mention_object(args: cutxml.CutEventArgs, object_id: int) -> bool:
+    return args.object_id == object_id or object_id in args.object_id_list
+
+
+def retarget_args(args: cutxml.CutEventArgs, old_id: int, new_id: int) -> bool:
+    """Point an argument block at another object, in both places one can be named."""
+    changed = False
+
+    if args.object_id == old_id:
+        changed = set_value(args.node, "iObjectId", new_id)
+        args.object_id = new_id
+
+    if old_id in args.object_id_list:
+        ids = [new_id if i == old_id else i for i in args.object_id_list]
+        changed = set_int_array(args.node, "iObjectIdList", ids) or changed
+        args.object_id_list = ids
+
+    return changed
+
+
+def add_to_object_list(args: cutxml.CutEventArgs, object_id: int) -> bool:
+    ids = list(args.object_id_list) + [object_id]
+    if not set_int_array(args.node, "iObjectIdList", ids):
+        return False
+
+    args.object_id_list = ids
+    return True
+
+
+def all_events(cutscene: cutxml.Cutscene) -> list[tuple[cutxml.CutEvent, bool]]:
+    """Both event lists as one, flagged by which they came from. A copy: callers append."""
+    return ([(event, False) for event in cutscene.events]
+            + [(event, True) for event in cutscene.load_events])
+
+
+def events_for_object(cutscene: cutxml.Cutscene, object_id: int) -> list[tuple[cutxml.CutEvent, bool]]:
+    """Events driving an object, either by iObjectId or through their arguments.
+
+    Both routes count. Of the 3957 actors in the shipped cutscenes not one is reached by
+    iObjectId alone, 3355 only through the arguments.
+    """
+    driving = []
+
+    for event, is_load in all_events(cutscene):
+        args = event.resolve(cutscene.event_args)
+        if event.object_id == object_id or (args is not None and args_mention_object(args, object_id)):
+            driving.append((event, is_load))
+
+    return driving
+
+
+def clone_actor(cutscene: cutxml.Cutscene, source: cutxml.CutObject,
+                model_name: str = "") -> Optional[cutxml.CutObject]:
+    """Add an actor modelled on an existing one, wired up the same way.
+
+    An object alone never shows up in game, the events are what load and play it. The two
+    kinds of argument block need opposite treatment: an ObjectIdListEventArgs names the
+    whole cast, so the new actor just joins the list, while a block naming a single object
+    gets copied and repointed.
+    """
+    clone = clone_object(cutscene, source)
+    if clone is None:
+        return None
+
+    if model_name:
+        set_model(clone, model_name)
+
+    old, new = source.object_id, clone.object_id
+
+    for args in list(cutscene.event_args):
+        if old in args.object_id_list and new not in args.object_id_list:
+            add_to_object_list(args, new)
+
+    # keyed by the index they were copied from, so the events can find them again
+    replacements: dict[int, cutxml.CutEventArgs] = {}
+    for args in list(cutscene.event_args):
+        if args.object_id != old:
+            continue
+
+        copy = clone_event_args(cutscene, args)
+        if copy is not None:
+            retarget_args(copy, old, new)
+            replacements[args.index] = copy
+
+    for event, is_load in all_events(cutscene):
+        args = event.resolve(cutscene.event_args)
+        copy = replacements.get(args.index) if args is not None else None
+        if copy is None and event.object_id != old:
+            continue
+
+        clone_event(cutscene, event, event.time,
+                    object_id=new if event.object_id == old else None,
+                    args=copy, load_event=is_load)
+
+    return clone
 
 
 def validate(cutscene: cutxml.Cutscene) -> list[str]:

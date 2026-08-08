@@ -41,6 +41,7 @@ class SOLLUMZ_PT_CUTSCENE_TOOL_PANEL(bpy.types.Panel):
             column = layout.column(align=True)
             column.label(text="No cutscene in the scene.", icon="INFO")
             column.operator("sollumz.import_assets", text="Import a .cut", icon="IMPORT")
+            column.operator("sollumz.new_cutscene", icon="FILE_NEW")
             return
 
         cutscene_obj = find_cutscene_obj(context) or cutscenes[0]
@@ -54,12 +55,16 @@ class SOLLUMZ_PT_CUTSCENE_TOOL_PANEL(bpy.types.Panel):
         duration = cutscene_obj.get("cut_duration", 0.0)
         fps = context.scene.render.fps or 30
         column = box.column(align=True)
-        column.label(text=f"{duration:.1f} s  ({round(duration * fps)} frames)", icon="TIME")
+        row = column.row(align=True)
+        row.label(text=f"{duration:.1f} s  ({round(duration * fps)} frames)", icon="TIME")
+        row.operator("sollumz.cutscene_set_duration", text="", icon="GREASEPENCIL")
 
         actors = [o for o in cutscene_obj.children_recursive
                   if o.sollum_type == SollumType.CUTSCENE_ACTOR]
         bound = sum(1 for a in actors if any(c.type == "ARMATURE" for c in a.children))
         column.label(text=f"{bound} of {len(actors)} actors bound", icon="OUTLINER_OB_ARMATURE")
+
+        layout.operator("sollumz.new_cutscene", icon="FILE_NEW")
 
 
 class CutsceneToolChildPanel:
@@ -94,6 +99,15 @@ class SOLLUMZ_PT_CUTSCENE_ACTORS_PANEL(CutsceneToolChildPanel, bpy.types.Panel):
         if missing:
             draw_missing(layout, missing)
             layout.separator()
+
+        pending = [a for a in actors if a.get("cut_object_id", -1) < 0]
+        if pending:
+            layout.label(text=f"{len(pending)} not in the file yet, export to add",
+                         icon="EXPORT")
+
+        row = layout.row(align=True)
+        row.operator("sollumz.cutscene_add_actor", icon="ADD")
+        row.operator("sollumz.cutscene_set_model", icon="GREASEPENCIL")
 
         layout.operator("sollumz.bind_cutscene_animations", icon="LINKED")
 
@@ -143,4 +157,6 @@ class SOLLUMZ_PT_CUTSCENE_FILE_PANEL(CutsceneToolChildPanel, bpy.types.Panel):
         else:
             column.label(text="Imported before this was tracked", icon="ERROR")
 
-        layout.operator("sollumz.export_cutscene", icon="EXPORT")
+        row = layout.row(align=True)
+        row.operator("sollumz.export_cutscene", icon="EXPORT")
+        row.operator("sollumz.cutscene_validate", text="", icon="CHECKMARK")
